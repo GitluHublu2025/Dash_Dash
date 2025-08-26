@@ -195,16 +195,16 @@ if combined_proc is not None:
             if df is not None and not df.empty:
                 st.dataframe(df, use_container_width=True)
 
-                # EPS Projection (10 years @ 8% growth)
-                st.markdown("**EPS Projection (10 years @ 8% growth)**")
-                for _, row in df.iterrows():
-                    if pd.notna(row["EPS"]) and row["EPS"] > 0:
-                        eps_proj = [row["EPS"]*((1+0.08)**i) for i in range(11)]
-                        proj_df = pd.DataFrame({"Year": range(11), "EPS": eps_proj})
-                        proj_chart = alt.Chart(proj_df).mark_line().encode(
-                            x="Year", y="EPS"
-                        ).properties(title=f"{row['Ticker']} EPS Projection")
-                        st.altair_chart(proj_chart, use_container_width=True)
+                # EPS Projection (10 years @ 8% growth) CHANGES MADE HERE
+                # st.markdown("**EPS Projection (10 years @ 8% growth)**")
+                # for _, row in df.iterrows():
+                   # if pd.notna(row["EPS"]) and row["EPS"] > 0:
+                       # eps_proj = [row["EPS"]*((1+0.08)**i) for i in range(11)]
+                       # proj_df = pd.DataFrame({"Year": range(11), "EPS": eps_proj})
+                       # proj_chart = alt.Chart(proj_df).mark_line().encode(
+                       #     x="Year", y="EPS"
+                      #  ).properties(title=f"{row['Ticker']} EPS Projection")
+                     #   st.altair_chart(proj_chart, use_container_width=True)
 
                 # Download CSV
                 csv = df.to_csv(index=False).encode()
@@ -230,5 +230,6 @@ if combined_proc is not None:
         file_name="portfolio_summary.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+
 
 
