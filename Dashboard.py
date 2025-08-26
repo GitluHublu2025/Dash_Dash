@@ -1,10 +1,9 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 import streamlit as st
 import pandas as pd
 import yfinance as yf
 import numpy as np
 import altair as alt
-import io
 from datetime import datetime
 from io import BytesIO
 
@@ -20,7 +19,6 @@ except Exception:
 
 # ---------------------- PAGE CONFIG ----------------------
 st.set_page_config(page_title="Live Portfolio Dashboard", layout="wide")
-
 st.title("📈 Live Profit & Loss Dashboard")
 
 # ---------------------- FILE UPLOAD ----------------------
@@ -37,7 +35,7 @@ def get_fx_rate():
         fx = yf.download("USDINR=X", period="1d", interval="1d")
         return fx["Close"].iloc[-1]
     except:
-        return 83.0  # fallback
+        return 83.0  # fallback if Yahoo fails
 fx_rate = get_fx_rate()
 
 # ---------------------- HELPER FUNCTIONS ----------------------
@@ -102,7 +100,6 @@ us_df = load_portfolio(us_file, is_india=False) if us_file else None
 india_proc = process_portfolio(india_df) if india_df is not None else None
 us_proc = process_portfolio(us_df) if us_df is not None else None
 
-# ---------------------- COMBINED PORTFOLIO ----------------------
 combined_proc = None
 if india_proc is not None and us_proc is not None:
     combined_proc = pd.concat([india_proc, us_proc], ignore_index=True)
@@ -111,20 +108,26 @@ elif india_proc is not None:
 elif us_proc is not None:
     combined_proc = us_proc.copy()
 
-# ---------------------- CURRENCY CONVERSION ----------------------
+# ---------------------- CURRENCY CONVERSION (patched) ----------------------
 def convert_currency(df, to="INR"):
     if df is None:
         return None
     df = df.copy()
+
     if to == "USD":
-        df["Cost"] = df.apply(lambda r: r["Cost"]/fx_rate if r["Ticker"].endswith(".NS") else r["Cost"], axis=1)
-        df["Market Value"] = df.apply(lambda r: r["Market Value"]/fx_rate if r["Ticker"].endswith(".NS") else r["Market Value"], axis=1)
-        df["Unrealized P/L"] = df["Market Value"] - df["Cost"]
+        df["Cost"] = df.apply(lambda r: r["Cost"]/fx_rate if str(r["Ticker"]).endswith(".NS") else r["Cost"], axis=1)
+        df["Market Value"] = df.apply(lambda r: r["Market Value"]/fx_rate if str(r["Ticker"]).endswith(".NS") else r["Market Value"], axis=1)
     else:  # INR
-        df["Cost"] = df.apply(lambda r: r["Cost"] if r["Ticker"].endswith(".NS") else r["Cost"]*fx_rate, axis=1)
-        df["Market Value"] = df.apply(lambda r: r["Market Value"] if r["Ticker"].endswith(".NS") else r["Market Value"]*fx_rate, axis=1)
-        df["Unrealized P/L"] = df["Market Value"] - df["Cost"]
-    df["Unrealized P/L %"] = (df["Unrealized P/L"]/df["Cost"]*100).round(2)
+        df["Cost"] = df.apply(lambda r: r["Cost"] if str(r["Ticker"]).endswith(".NS") else r["Cost"]*fx_rate, axis=1)
+        df["Market Value"] = df.apply(lambda r: r["Market Value"] if str(r["Ticker"]).endswith(".NS") else r["Market Value"]*fx_rate, axis=1)
+
+    # 🔥 Force numeric type to avoid "object" errors
+    df["Cost"] = pd.to_numeric(df["Cost"], errors="coerce")
+    df["Market Value"] = pd.to_numeric(df["Market Value"], errors="coerce")
+
+    df["Unrealized P/L"] = df["Market Value"] - df["Cost"]
+    df["Unrealized P/L %"] = ((df["Unrealized P/L"] / df["Cost"]) * 100).round(2)
+
     return df
 
 india_proc = convert_currency(india_proc, to=currency_choice)
@@ -144,7 +147,7 @@ if combined_proc is not None:
     st.metric("Unrealized P/L", f"{total_pl:,.2f} {currency_choice}", f"{total_pl_pct:.2f}%")
 
 # ---------------------- BENCHMARK COMPARISON ----------------------
-st.subheader("Portfolio vs Benchmarks")
+st.subheader("📊 Portfolio vs Benchmarks")
 benchmarks = {"S&P 500": "^GSPC", "NASDAQ": "^IXIC", "NIFTY50": "^NSEI"}
 
 def get_perf(ticker):
@@ -155,10 +158,6 @@ def get_perf(ticker):
         return pd.Series(dtype=float)
 
 if combined_proc is not None:
-    perf_df = pd.DataFrame()
-    perf_df["Portfolio"] = (
-        combined_proc["Market Value"].sum()/combined_proc["Cost"].sum()-1
-    )
     chart_data = pd.DataFrame()
     for name, symbol in benchmarks.items():
         chart_data[name] = get_perf(symbol)
@@ -177,21 +176,21 @@ if combined_proc is not None:
 
     for tab, df in zip(tabs, portfolios.values()):
         with tab:
-            if df is not None:
+            if df is not None and not df.empty:
                 st.dataframe(df, use_container_width=True)
 
-                # EPS Projection (example chart per ticker)
-                st.markdown("**EPS Projection (10 years)**")
+                # EPS Projection (10 years, simple 8% growth assumption)
+                st.markdown("**EPS Projection (10 years @ 8% growth)**")
                 for _, row in df.iterrows():
                     if pd.notna(row["EPS"]) and row["EPS"] > 0:
-                        eps_proj = [row["EPS"]*((1+0.08)**i) for i in range(11)]  # assume 8% growth
+                        eps_proj = [row["EPS"]*((1+0.08)**i) for i in range(11)]
                         proj_df = pd.DataFrame({"Year": range(11), "EPS": eps_proj})
                         proj_chart = alt.Chart(proj_df).mark_line().encode(x="Year", y="EPS").properties(
                             title=f"{row['Ticker']} EPS Projection"
                         )
                         st.altair_chart(proj_chart, use_container_width=True)
 
-                # Download buttons
+                # Download CSV
                 csv = df.to_csv(index=False).encode()
                 st.download_button(
                     label="Download CSV",
@@ -215,3 +214,5 @@ if combined_proc is not None:
         file_name="portfolio_summary.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+
+
