@@ -152,22 +152,48 @@ benchmarks = {"S&P 500": "^GSPC", "NASDAQ": "^IXIC", "NIFTY50": "^NSEI"}
 
 def get_perf(ticker):
     try:
-        hist = yf.download(ticker, period="1y", interval="1d")
-        return hist["Close"].pct_change().add(1).cumprod()-1
-    except:
+        hist = yf.download(ticker, period="1y", interval="1d", progress=False)
+        if hist.empty:
+            return pd.Series(dtype=float)
+        # cumulative return series (0.0 = 0%, 0.10 = +10%)
+        return hist["Close"].pct_change().add(1).cumprod() - 1
+    except Exception:
         return pd.Series(dtype=float)
 
-if combined_proc is not None:
-    chart_data = pd.DataFrame()
-    for name, symbol in benchmarks.items():
-        chart_data[name] = get_perf(symbol)
-    chart_data = chart_data.dropna()
-    chart_data.index = chart_data.index.date
+# Build a multi-column dataframe of benchmark returns
+series_list = []
+for name, symbol in benchmarks.items():
+    s = get_perf(symbol)
+    if not s.empty:
+        s.name = name
+        series_list.append(s)
 
-    chart = alt.Chart(chart_data.reset_index().melt("Date")).mark_line().encode(
-        x="Date:T", y=alt.Y("value:Q", axis=alt.Axis(format="%")), color="variable:N"
-    ).properties(title="Benchmark Performance (1Y)")
+if series_list:
+    chart_df = pd.concat(series_list, axis=1)
+    # Make the DatetimeIndex a column named "Date"
+    chart_df = chart_df.reset_index().rename(columns={"index": "Date"})
+    # Long format for Altair
+    long_df = chart_df.melt(id_vars="Date", var_name="Benchmark", value_name="Return")
+
+    chart = (
+        alt.Chart(long_df)
+        .mark_line()
+        .encode(
+            x="Date:T",
+            y=alt.Y("Return:Q", axis=alt.Axis(format="%")),
+            color="Benchmark:N",
+            tooltip=[
+                "Date:T",
+                "Benchmark:N",
+                alt.Tooltip("Return:Q", format=".2%")
+            ],
+        )
+        .properties(title="Benchmark Performance (1Y)")
+    )
     st.altair_chart(chart, use_container_width=True)
+else:
+    st.info("Benchmark data not available right now (data source returned empty).")
+
 
 # ---------------------- PORTFOLIO TABS ----------------------
 if combined_proc is not None:
@@ -214,5 +240,6 @@ if combined_proc is not None:
         file_name="portfolio_summary.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+
 
 
