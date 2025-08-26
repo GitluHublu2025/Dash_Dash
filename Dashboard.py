@@ -32,10 +32,10 @@ currency_choice = st.sidebar.radio("Display Currency", ["INR", "USD"])
 @st.cache_data(ttl=300)
 def get_fx_rate():
     try:
-        fx = yf.download("USDINR=X", period="1d", interval="1d")
+        fx = yf.download("USDINR=X", period="1d", interval="1d", progress=False)
         return fx["Close"].iloc[-1]
     except:
-        return 83.0  # fallback if Yahoo fails
+        return 83.0  # fallback
 fx_rate = get_fx_rate()
 
 # ---------------------- HELPER FUNCTIONS ----------------------
@@ -108,7 +108,7 @@ elif india_proc is not None:
 elif us_proc is not None:
     combined_proc = us_proc.copy()
 
-# ---------------------- CURRENCY CONVERSION (patched) ----------------------
+# ---------------------- CURRENCY CONVERSION ----------------------
 def convert_currency(df, to="INR"):
     if df is None:
         return None
@@ -121,7 +121,7 @@ def convert_currency(df, to="INR"):
         df["Cost"] = df.apply(lambda r: r["Cost"] if str(r["Ticker"]).endswith(".NS") else r["Cost"]*fx_rate, axis=1)
         df["Market Value"] = df.apply(lambda r: r["Market Value"] if str(r["Ticker"]).endswith(".NS") else r["Market Value"]*fx_rate, axis=1)
 
-    # 🔥 Force numeric type to avoid "object" errors
+    # Ensure numeric
     df["Cost"] = pd.to_numeric(df["Cost"], errors="coerce")
     df["Market Value"] = pd.to_numeric(df["Market Value"], errors="coerce")
 
@@ -155,12 +155,10 @@ def get_perf(ticker):
         hist = yf.download(ticker, period="1y", interval="1d", progress=False)
         if hist.empty:
             return pd.Series(dtype=float)
-        # cumulative return series (0.0 = 0%, 0.10 = +10%)
         return hist["Close"].pct_change().add(1).cumprod() - 1
     except Exception:
         return pd.Series(dtype=float)
 
-# Build a multi-column dataframe of benchmark returns
 series_list = []
 for name, symbol in benchmarks.items():
     s = get_perf(symbol)
@@ -169,10 +167,7 @@ for name, symbol in benchmarks.items():
         series_list.append(s)
 
 if series_list:
-    chart_df = pd.concat(series_list, axis=1)
-    # Make the DatetimeIndex a column named "Date"
-    chart_df = chart_df.reset_index().rename(columns={"index": "Date"})
-    # Long format for Altair
+    chart_df = pd.concat(series_list, axis=1).reset_index().rename(columns={"index": "Date"})
     long_df = chart_df.melt(id_vars="Date", var_name="Benchmark", value_name="Return")
 
     chart = (
@@ -182,38 +177,33 @@ if series_list:
             x="Date:T",
             y=alt.Y("Return:Q", axis=alt.Axis(format="%")),
             color="Benchmark:N",
-            tooltip=[
-                "Date:T",
-                "Benchmark:N",
-                alt.Tooltip("Return:Q", format=".2%")
-            ],
+            tooltip=["Date:T", "Benchmark:N", alt.Tooltip("Return:Q", format=".2%")],
         )
         .properties(title="Benchmark Performance (1Y)")
     )
     st.altair_chart(chart, use_container_width=True)
 else:
-    st.info("Benchmark data not available right now (data source returned empty).")
-
+    st.info("Benchmark data not available.")
 
 # ---------------------- PORTFOLIO TABS ----------------------
 if combined_proc is not None:
     tabs = st.tabs(["Indian Portfolio", "US Portfolio", "Combined Portfolio"])
     portfolios = {"Indian Portfolio": india_proc, "US Portfolio": us_proc, "Combined Portfolio": combined_proc}
 
-    for tab, df in zip(tabs, portfolios.values()):
+    for tab, (name, df) in zip(tabs, portfolios.items()):
         with tab:
             if df is not None and not df.empty:
                 st.dataframe(df, use_container_width=True)
 
-                # EPS Projection (10 years, simple 8% growth assumption)
+                # EPS Projection (10 years @ 8% growth)
                 st.markdown("**EPS Projection (10 years @ 8% growth)**")
                 for _, row in df.iterrows():
                     if pd.notna(row["EPS"]) and row["EPS"] > 0:
                         eps_proj = [row["EPS"]*((1+0.08)**i) for i in range(11)]
                         proj_df = pd.DataFrame({"Year": range(11), "EPS": eps_proj})
-                        proj_chart = alt.Chart(proj_df).mark_line().encode(x="Year", y="EPS").properties(
-                            title=f"{row['Ticker']} EPS Projection"
-                        )
+                        proj_chart = alt.Chart(proj_df).mark_line().encode(
+                            x="Year", y="EPS"
+                        ).properties(title=f"{row['Ticker']} EPS Projection")
                         st.altair_chart(proj_chart, use_container_width=True)
 
                 # Download CSV
@@ -221,7 +211,7 @@ if combined_proc is not None:
                 st.download_button(
                     label="Download CSV",
                     data=csv,
-                    file_name=f"{tab.lower().replace(' ','_')}.csv",
+                    file_name=f"{name.lower().replace(' ','_')}.csv",
                     mime="text/csv",
                 )
 
@@ -240,6 +230,5 @@ if combined_proc is not None:
         file_name="portfolio_summary.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
-
 
 
